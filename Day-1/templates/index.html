@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LLM Day-1</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; }
+    textarea { width: 100%; padding: 8px; font-size: 1rem; box-sizing: border-box; }
+    button { margin-top: 8px; padding: 8px 20px; font-size: 1rem; cursor: pointer; }
+    .box { white-space: pre-wrap; background: #f4f4f5; border-radius: 8px; padding: 16px; margin-top: 20px; }
+    .error { background: #fde8e8; color: #9b1c1c; }
+  </style>
+</head>
+<body>
+  <h1>LLM Day-1</h1>
+  <form method="post">
+    <textarea name="prompt" rows="4" placeholder="Ваш вопрос..." autofocus>{{ prompt }}</textarea>
+    <button type="submit">Спросить</button>
+  </form>
+
+  {% if error %}
+    <div class="box error">{{ error }}</div>
+  {% elif answer is not none %}
+    <div class="box">{{ answer }}</div>
+  {% endif %}
+</body>
+</html>
