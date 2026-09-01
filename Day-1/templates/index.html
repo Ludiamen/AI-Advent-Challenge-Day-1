@@ -7,22 +7,41 @@
   <style>
     body { font-family: system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; }
     textarea { width: 100%; padding: 8px; font-size: 1rem; box-sizing: border-box; }
-    button { margin-top: 8px; padding: 8px 20px; font-size: 1rem; cursor: pointer; }
+    select, button { margin-top: 8px; padding: 8px 12px; font-size: 1rem; }
+    button { padding: 8px 20px; cursor: pointer; }
+    .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
     .box { white-space: pre-wrap; background: #f4f4f5; border-radius: 8px; padding: 16px; margin-top: 20px; }
     .error { background: #fde8e8; color: #9b1c1c; }
+    .meta { color: #6b7280; font-size: .85rem; margin-top: 8px; }
   </style>
 </head>
 <body>
   <h1>LLM Day-1</h1>
   <form method="post">
     <textarea name="prompt" rows="4" placeholder="Ваш вопрос..." autofocus>{{ prompt }}</textarea>
-    <button type="submit">Спросить</button>
+    <div class="row">
+      <label>Профиль ответа:
+        <select name="profile">
+          {% for p in profiles %}
+            <option value="{{ p }}" {{ 'selected' if p == profile }}>{{ p }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button type="submit">Спросить</button>
+    </div>
+    <div class="meta">
+      free — без ограничений; structured — явный формат + ограничение длины (max_tokens) + stop-последовательность.
+    </div>
   </form>
 
   {% if error %}
     <div class="box error">{{ error }}</div>
-  {% elif answer is not none %}
-    <div class="box">{{ answer }}</div>
+  {% elif result is not none %}
+    <div class="box">{{ result.text }}</div>
+    <div class="meta">
+      finish_reason={{ result.finish_reason }} · слов={{ result.word_count }} ·
+      символов={{ result.text|length }} · completion_tokens={{ result.completion_tokens }}
+    </div>
   {% endif %}
 </body>
 </html>

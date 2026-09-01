@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Простой веб-интерфейс: одно поле ввода, кнопка, ответ LLM на странице.
+"""Простой веб-интерфейс: поле ввода, выбор профиля контроля ответа, ответ LLM.
 
 Запуск:
     python web.py
@@ -8,7 +8,7 @@
 
 from flask import Flask, render_template, request
 
-from llm_client import LLMError, ask
+from llm_client import PROFILES, LLMError, ask_full
 
 app = Flask(__name__)
 
@@ -16,17 +16,28 @@ app = Flask(__name__)
 @app.route("/", methods=["GET", "POST"])
 def index():
     prompt = ""
-    answer = None
+    profile = "free"
+    result = None
     error = None
 
     if request.method == "POST":
         prompt = request.form.get("prompt", "").strip()
+        profile = request.form.get("profile", "free")
+        if profile not in PROFILES:
+            profile = "free"
         try:
-            answer = ask(prompt)
+            result = ask_full(prompt, **PROFILES[profile])
         except LLMError as exc:
             error = str(exc)
 
-    return render_template("index.html", prompt=prompt, answer=answer, error=error)
+    return render_template(
+        "index.html",
+        prompt=prompt,
+        profile=profile,
+        profiles=sorted(PROFILES),
+        result=result,
+        error=error,
+    )
 
 
 if __name__ == "__main__":
