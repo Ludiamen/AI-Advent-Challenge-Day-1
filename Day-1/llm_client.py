@@ -1,14 +1,22 @@
 """Минимальный клиент к LLM DeepSeek (API совместим с OpenAI Chat Completions).
 
 Публичное API:
-  ask(prompt, ...)       -> str            — только текст ответа (используют cli.py, web.py)
-  ask_full(prompt, ...)  -> LLMResult      — текст + finish_reason + расход токенов
-  PROFILES               -> dict           — готовые профили контроля ответа
+  ask(prompt, ...)                    -> str        — только текст (используют cli.py, web.py)
+  ask_full(prompt, ...)              -> LLMResult   — текст + finish_reason + расход токенов
+  PROFILES                          -> dict        — профиль «свободный» (без ограничений)
+  FORMATS                           -> dict        — варианты формата для профиля «строгий»
+  LENGTH_PRESETS                    -> dict        — пресеты длины ответа в словах
+  build_structured_profile(fmt, n)  -> dict        — собрать «строгий» профиль
 
 Профиль — это набор параметров, задающих «уровень контроля» над ответом:
   * format_instruction — явное описание формата (добавляется к system-промпту);
   * max_tokens         — жёсткое ограничение длины на стороне API;
   * stop               — стоп-последовательности (условие завершения ответа).
+
+Два профиля:
+  «свободный» — без ограничений, модель отвечает как хочет;
+  «строгий»   — собирается под выбор пользователя: формат (FORMATS) и предельная
+                длина в словах (пресеты LENGTH_PRESETS или произвольное число).
 """
 
 from __future__ import annotations
@@ -31,27 +39,102 @@ BASE_SYSTEM = "Ты полезный ассистент. Отвечай крат
 # а API обрывает генерацию на нём (stop), поэтому в готовом тексте он не виден.
 END_MARKER = "END"
 
+# Названия профилей (они же — значения флага --profile и поля формы).
+PROFILE_FREE = "свободный"
+PROFILE_STRICT = "строгий"
+
+# Профиль без ограничений — модель отвечает как хочет.
 PROFILES: dict[str, dict] = {
-    # Без ограничений — модель отвечает как хочет.
-    "free": {
+    PROFILE_FREE: {
         "format_instruction": "",
         "max_tokens": None,
         "stop": None,
     },
-    # С ограничениями: явный формат + предел длины + условие завершения.
-    "structured": {
-        "format_instruction": (
-            "Формат ответа строго такой: маркированный список ровно из 3 пунктов, "
-            "каждый пункт — с новой строки и начинается с «- », одно предложение. "
-            "Весь ответ — не более 45 слов. Без вступления и заключения. "
-            f"После третьего пункта с новой строки напиши {END_MARKER} и больше ничего."
+}
+
+# Варианты формата для профиля «строгий»: ключ -> {название, фрагмент инструкции}.
+FORMATS: dict[str, dict[str, str]] = {
+    "список-3": {
+        "label": "Список из 3 пунктов",
+        "instruction": (
+            "в виде маркированного списка ровно из 3 пунктов; каждый пункт — с новой "
+            "строки, начинается с «- », одно предложение"
         ),
-        # max_tokens — жёсткий предохранитель (≈ в 3 раза короче типичного free-ответа);
-        # основную форму задаёт инструкция, а обрывает генерацию stop-маркер END.
-        "max_tokens": 220,
-        "stop": [END_MARKER],
+    },
+    "список-5": {
+        "label": "Список из 5 пунктов",
+        "instruction": (
+            "в виде маркированного списка ровно из 5 пунктов; каждый пункт — с новой "
+            "строки, начинается с «- »"
+        ),
+    },
+    "шаги": {
+        "label": "Нумерованные шаги",
+        "instruction": "в виде нумерованного списка шагов (1., 2., 3. …); каждый шаг — с новой строки",
+    },
+    "абзац": {
+        "label": "Один абзац",
+        "instruction": "в виде одного связного абзаца, без списков, заголовков и переносов строк",
+    },
+    "резюме": {
+        "label": "Одно предложение (TL;DR)",
+        "instruction": "в виде одного ёмкого предложения-резюме",
+    },
+    "вопрос-ответ": {
+        "label": "Пары «вопрос — ответ»",
+        "instruction": "в формате «Вопрос: … / Ответ: …», 2–3 пары",
     },
 }
+
+# Пресеты длины ответа: число слов -> подпись для интерфейса.
+# Пользователь может указать и своё число (1..MAX_WORDS).
+LENGTH_PRESETS: dict[int, str] = {
+    10: "10 слов — очень кратко",
+    50: "50 слов — кратко",
+    200: "200 слов — развёрнуто",
+}
+
+DEFAULT_PROFILE = PROFILE_FREE
+DEFAULT_FORMAT = "список-3"
+DEFAULT_WORDS = 50
+MAX_WORDS = 2000        # верхняя граница вменяемого запроса
+REASONING_BUDGET = 900  # запас токенов на скрытое рассуждение модели (см. build_structured_profile)
+
+
+def build_structured_profile(fmt: str = DEFAULT_FORMAT, words: int = DEFAULT_WORDS) -> dict:
+    """Собирает «строгий» профиль под выбор пользователя.
+
+    fmt   — ключ из FORMATS (описание формата ответа);
+    words — предельная длина ответа в словах (>= 1).
+
+    Все три рычага контроля включаются вместе:
+      * формат        — явной инструкцией в system-промпте;
+      * длина         — и в инструкции («не более N слов»), и жёстко в max_tokens;
+      * завершение    — стоп-последовательностью END плюс требование её напечатать.
+    """
+    if fmt not in FORMATS:
+        raise LLMError(f"Неизвестный формат '{fmt}'. Доступны: {', '.join(FORMATS)}.")
+    try:
+        words = int(words)
+    except (TypeError, ValueError):
+        raise LLMError("Число слов должно быть целым.") from None
+    if not 1 <= words <= MAX_WORDS:
+        raise LLMError(f"Число слов должно быть от 1 до {MAX_WORDS}.")
+
+    instruction = (
+        f"Ответь строго {FORMATS[fmt]['instruction']}. "
+        f"Весь ответ — не более {words} слов. Без вступления и заключения. "
+        f"Закончив ответ, с новой строки напиши {END_MARKER} и больше ничего."
+    )
+    return {
+        "format_instruction": instruction,
+        # deepseek-v4-flash — рассуждающая модель: скрытые reasoning-токены тоже
+        # тратят бюджет max_tokens. Поэтому кэп = запас на рассуждение (REASONING_BUDGET)
+        # + грубая оценка ответа. Реальную длину и форму держит инструкция в промпте,
+        # а генерацию завершает стоп-маркер END; max_tokens — только предохранитель.
+        "max_tokens": REASONING_BUDGET + words * 6,
+        "stop": [END_MARKER],
+    }
 
 
 class LLMError(RuntimeError):
@@ -65,7 +148,8 @@ class LLMResult:
     text: str
     finish_reason: str = ""            # "stop", "length", ...
     prompt_tokens: int = 0
-    completion_tokens: int = 0
+    completion_tokens: int = 0         # включает reasoning_tokens
+    reasoning_tokens: int = 0          # скрытое рассуждение (deepseek-v4-flash)
     request_params: dict = field(default_factory=dict)  # что реально ушло в API
 
     @property
@@ -138,26 +222,60 @@ def ask_full(
         data = response.json()
         choice = data["choices"][0]
         usage = data.get("usage", {})
-        return LLMResult(
-            text=choice["message"]["content"].strip(),
-            finish_reason=choice.get("finish_reason", ""),
-            prompt_tokens=usage.get("prompt_tokens", 0),
-            completion_tokens=usage.get("completion_tokens", 0),
-            request_params={
-                "max_tokens": max_tokens,
-                "stop": stop,
-                "format_instruction": bool(format_instruction),
-            },
-        )
+        text = choice["message"]["content"].strip()
+        finish_reason = choice.get("finish_reason", "")
+        reasoning_tokens = usage.get("completion_tokens_details", {}).get("reasoning_tokens", 0)
     except (ValueError, KeyError, IndexError) as exc:
         raise LLMError(f"Неожиданный формат ответа API: {response.text[:500]}") from exc
 
+    if not text:
+        raise LLMError(
+            "Модель вернула пустой ответ"
+            + (f" (finish_reason={finish_reason})" if finish_reason else "")
+            + (
+                f": весь бюджет max_tokens={max_tokens} ушёл на рассуждение "
+                f"({reasoning_tokens} токенов). Увеличьте лимит слов."
+                if finish_reason == "length"
+                else "."
+            )
+        )
 
-def ask(prompt: str, system: str = BASE_SYSTEM, *, profile: str = "free") -> str:
-    """Упрощённая обёртка: возвращает только текст ответа.
+    return LLMResult(
+        text=text,
+        finish_reason=finish_reason,
+        prompt_tokens=usage.get("prompt_tokens", 0),
+        completion_tokens=usage.get("completion_tokens", 0),
+        reasoning_tokens=reasoning_tokens,
+        request_params={
+            "max_tokens": max_tokens,
+            "stop": stop,
+            "format_instruction": bool(format_instruction),
+        },
+    )
 
-    profile — ключ из PROFILES ("free" без ограничений, "structured" с ограничениями).
+
+def resolve_profile(profile: str, fmt: str = DEFAULT_FORMAT, words: int = DEFAULT_WORDS) -> dict:
+    """Возвращает параметры запроса по имени профиля.
+
+    «свободный» — без ограничений;
+    «строгий»   — формат fmt + предел words слов + стоп-маркер END.
     """
-    if profile not in PROFILES:
-        raise LLMError(f"Неизвестный профиль '{profile}'. Доступны: {', '.join(PROFILES)}.")
-    return ask_full(prompt, system, **PROFILES[profile]).text
+    if profile == PROFILE_FREE:
+        return PROFILES[PROFILE_FREE]
+    if profile == PROFILE_STRICT:
+        return build_structured_profile(fmt, words)
+    raise LLMError(
+        f"Неизвестный профиль '{profile}'. Доступны: {PROFILE_FREE}, {PROFILE_STRICT}."
+    )
+
+
+def ask(
+    prompt: str,
+    system: str = BASE_SYSTEM,
+    *,
+    profile: str = DEFAULT_PROFILE,
+    fmt: str = DEFAULT_FORMAT,
+    words: int = DEFAULT_WORDS,
+) -> str:
+    """Упрощённая обёртка: возвращает только текст ответа."""
+    return ask_full(prompt, system, **resolve_profile(profile, fmt, words)).text

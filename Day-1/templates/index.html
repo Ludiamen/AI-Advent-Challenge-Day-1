@@ -5,33 +5,60 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>LLM Day-1</title>
   <style>
-    body { font-family: system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; }
+    body { font-family: system-ui, sans-serif; max-width: 680px; margin: 40px auto; padding: 0 16px; }
     textarea { width: 100%; padding: 8px; font-size: 1rem; box-sizing: border-box; }
-    select, button { margin-top: 8px; padding: 8px 12px; font-size: 1rem; }
+    select, input, button { margin-top: 8px; padding: 8px 12px; font-size: 1rem; }
     button { padding: 8px 20px; cursor: pointer; }
-    .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    .row { display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; }
+    label { display: flex; flex-direction: column; font-size: .85rem; color: #374151; gap: 2px; }
+    input[type=number] { width: 120px; }
     .box { white-space: pre-wrap; background: #f4f4f5; border-radius: 8px; padding: 16px; margin-top: 20px; }
     .error { background: #fde8e8; color: #9b1c1c; }
     .meta { color: #6b7280; font-size: .85rem; margin-top: 8px; }
+    details { margin-top: 22px; border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px 14px; }
+    summary { cursor: pointer; font-weight: 600; }
+    details table { border-collapse: collapse; margin: 10px 0; font-size: .88rem; }
+    details td, details th { border: 1px solid #e5e7eb; padding: 4px 8px; text-align: left; vertical-align: top; }
+    details code { background: #f4f4f5; padding: 1px 4px; border-radius: 4px; }
   </style>
 </head>
 <body>
   <h1>LLM Day-1</h1>
   <form method="post">
-    <textarea name="prompt" rows="4" placeholder="Ваш вопрос..." autofocus>{{ prompt }}</textarea>
+    <textarea name="prompt" rows="4" placeholder="Ваш вопрос..." autofocus>{{ form.prompt }}</textarea>
+
     <div class="row">
-      <label>Профиль ответа:
+      <label>Профиль
         <select name="profile">
           {% for p in profiles %}
-            <option value="{{ p }}" {{ 'selected' if p == profile }}>{{ p }}</option>
+            <option value="{{ p }}" {{ 'selected' if p == form.profile }}>{{ p }}</option>
           {% endfor %}
         </select>
       </label>
-      <button type="submit">Спросить</button>
+
+      <label>Формат (для «{{ strict_profile }}»)
+        <select name="fmt">
+          {% for key, meta in formats.items() %}
+            <option value="{{ key }}" {{ 'selected' if key == form.fmt }}>{{ meta.label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <label>Длина ответа
+        <select name="words_preset">
+          {% for n, caption in length_presets.items() %}
+            <option value="{{ n }}" {{ 'selected' if n|string == form.words_preset }}>{{ caption }}</option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <label>…или своё число слов
+        <input type="number" name="words_custom" min="1" max="2000"
+               placeholder="напр. 120" value="{{ form.words_custom }}">
+      </label>
     </div>
-    <div class="meta">
-      free — без ограничений; structured — явный формат + ограничение длины (max_tokens) + stop-последовательность.
-    </div>
+
+    <button type="submit">Спросить</button>
   </form>
 
   {% if error %}
@@ -41,7 +68,55 @@
     <div class="meta">
       finish_reason={{ result.finish_reason }} · слов={{ result.word_count }} ·
       символов={{ result.text|length }} · completion_tokens={{ result.completion_tokens }}
+      (reasoning={{ result.reasoning_tokens }})
     </div>
   {% endif %}
+
+  <details>
+    <summary>❓ Справка по форме</summary>
+
+    <p><b>Профиль</b> — насколько жёстко управляем ответом:</p>
+    <table>
+      <tr><th>Значение</th><th>Что делает</th></tr>
+      <tr>
+        <td><code>{{ profiles[0] }}</code></td>
+        <td>Без ограничений. Поля «Формат» и «Длина» игнорируются — модель отвечает как хочет.</td>
+      </tr>
+      <tr>
+        <td><code>{{ strict_profile }}</code></td>
+        <td>В промпт добавляется инструкция по выбранному формату, задаётся предел длины
+            (в словах + <code>max_tokens</code> как предохранитель), ответ завершается
+            стоп-последовательностью <code>END</code>.</td>
+      </tr>
+    </table>
+
+    <p><b>Формат</b> (работает только при профиле «{{ strict_profile }}»):</p>
+    <table>
+      <tr><th>Значение</th><th>Результат</th></tr>
+      {% for key, meta in formats.items() %}
+        <tr><td><code>{{ key }}</code></td><td>{{ meta.label }}</td></tr>
+      {% endfor %}
+    </table>
+
+    <p><b>Длина ответа</b>: выберите пресет ({% for n in length_presets %}{{ n }}{{ ", " if not loop.last }}{% endfor %} слов)
+       или впишите своё число в поле «…или своё число слов» — оно переопределяет пресет.
+       Допустимо 1–2000 слов; при неверном значении форма покажет ошибку.</p>
+
+    <p><b>Метрики под ответом</b>: <code>finish_reason=stop</code> — ответ завершён по маркеру
+       <code>END</code>; <code>length</code> — упор в <code>max_tokens</code>.
+       <code>reasoning</code> — сколько токенов ушло на скрытое рассуждение модели.</p>
+
+    <p><b>Примеры</b>:</p>
+    <ul>
+      <li>Запрос «Чем полезна ходьба?», профиль <code>{{ strict_profile }}</code>,
+          формат <code>{{ formats.keys()|list|first }}</code>, длина <code>50</code> — короткий список.</li>
+      <li>Тот же запрос, формат <code>абзац</code>, своё число слов <code>200</code> — развёрнутый абзац.</li>
+      <li>Тот же запрос, формат <code>резюме</code>, длина <code>10</code> — одно предложение.</li>
+      <li>Профиль <code>{{ profiles[0] }}</code> — тот же запрос без каких-либо рамок, для сравнения.</li>
+    </ul>
+
+    <p>Сравнить «{{ profiles[0] }}» и «{{ strict_profile }}» на одном запросе в консоли:
+       <code>python compare.py "Чем полезна ходьба?"</code></p>
+  </details>
 </body>
 </html>

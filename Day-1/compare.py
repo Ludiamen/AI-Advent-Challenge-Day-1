@@ -1,25 +1,35 @@
 #!/usr/bin/env python3
 """Сравнение одного и того же запроса с разным уровнем контроля ответа.
 
-Отправляет DEMO_PROMPT дважды:
-  1. без ограничений         (профиль "free")
-  2. с ограничениями         (профиль "structured": явный формат + max_tokens + stop)
+Отправляет запрос дважды:
+  1. профиль «свободный» — без ограничений;
+  2. профиль «строгий»   — выбранный формат + предел слов + стоп-маркер END
 и печатает оба ответа с метаданными (finish_reason, токены, число слов).
 
 Использование:
-    python compare.py                 # фиксированный демо-запрос
-    python compare.py "Свой вопрос"   # тот же прогон на своём запросе
+    python compare.py                                    # демо-запрос, строгий = список-3 / 50 слов
+    python compare.py "Свой вопрос"
+    python compare.py --format шаги --words 200 "Вопрос"
 """
 
-import sys
+import argparse
 
-from llm_client import BASE_SYSTEM, PROFILES, LLMError, ask_full
+from llm_client import (
+    BASE_SYSTEM,
+    DEFAULT_FORMAT,
+    DEFAULT_WORDS,
+    FORMATS,
+    PROFILE_FREE,
+    PROFILE_STRICT,
+    LLMError,
+    ask_full,
+    resolve_profile,
+)
 
 DEMO_PROMPT = "Расскажи о пользе утренней зарядки."
 
 
-def run(title: str, prompt: str, profile_name: str) -> None:
-    params = PROFILES[profile_name]
+def run(title: str, prompt: str, params: dict) -> None:
     result = ask_full(prompt, BASE_SYSTEM, **params)
 
     print("=" * 70)
@@ -36,31 +46,46 @@ def run(title: str, prompt: str, profile_name: str) -> None:
         f"finish_reason={result.finish_reason!r}  "
         f"слов={result.word_count}  "
         f"символов={len(result.text)}  "
-        f"completion_tokens={result.completion_tokens}"
+        f"completion_tokens={result.completion_tokens} "
+        f"(из них reasoning={result.reasoning_tokens})"
     )
     print()
 
 
 def main() -> int:
-    if any(a in ("-h", "--help") for a in sys.argv[1:]):
-        print(__doc__)
-        return 0
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument("prompt", nargs="*", help="запрос (по умолчанию — демо про утреннюю зарядку)")
+    parser.add_argument(
+        "--format", dest="fmt", choices=list(FORMATS), default=DEFAULT_FORMAT, metavar="ФОРМАТ",
+        help=f"формат ответа для профиля «{PROFILE_STRICT}» (по умолчанию {DEFAULT_FORMAT})",
+    )
+    parser.add_argument(
+        "--words", type=int, default=DEFAULT_WORDS, metavar="N",
+        help=f"предел длины в словах для «{PROFILE_STRICT}» (по умолчанию {DEFAULT_WORDS})",
+    )
+    args = parser.parse_args()
 
-    prompt = " ".join(sys.argv[1:]).strip() or DEMO_PROMPT
+    prompt = " ".join(args.prompt).strip() or DEMO_PROMPT
     print(f"Запрос: {prompt}\n")
 
     try:
-        run("БЕЗ ОГРАНИЧЕНИЙ (profile=free)", prompt, "free")
-        run("С ОГРАНИЧЕНИЯМИ (profile=structured)", prompt, "structured")
+        run(f"БЕЗ ОГРАНИЧЕНИЙ (профиль «{PROFILE_FREE}»)", prompt, resolve_profile(PROFILE_FREE))
+        run(
+            f"С ОГРАНИЧЕНИЯМИ (профиль «{PROFILE_STRICT}», формат={args.fmt}, слов≤{args.words})",
+            prompt,
+            resolve_profile(PROFILE_STRICT, args.fmt, args.words),
+        )
     except LLMError as exc:
-        print(f"Ошибка: {exc}", file=sys.stderr)
+        print(f"Ошибка: {exc}")
         return 1
 
     print("=" * 70)
     print("Вывод: один и тот же запрос, разный уровень контроля через API.")
-    print("  free       — длина и структура на усмотрение модели.")
-    print("  structured — формат задан в промпте, длина ограничена max_tokens,")
-    print("               генерация завершается по stop-последовательности.")
+    print(f"  «{PROFILE_FREE}»  — длина и структура на усмотрение модели.")
+    print(f"  «{PROFILE_STRICT}»   — формат и длина заданы пользователем, генерация")
+    print("               завершается по stop-последовательности END.")
     return 0
 
 
