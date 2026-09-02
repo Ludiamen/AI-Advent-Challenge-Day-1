@@ -3,6 +3,7 @@
 Публичное API:
   ask(prompt, ...)                    -> str        — только текст (используют cli.py, web.py)
   ask_full(prompt, ...)              -> LLMResult   — текст + finish_reason + расход токенов
+  MODELS                            -> dict        — модели на выбор (id -> подпись)
   PROFILES                          -> dict        — профиль «свободный» (без ограничений)
   FORMATS                           -> dict        — варианты формата для профиля «строгий»
   LENGTH_PRESETS                    -> dict        — пресеты длины ответа в словах
@@ -29,7 +30,16 @@ from dotenv import load_dotenv
 
 load_dotenv()  # подхватываем переменные из .env, если файл есть
 
-MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
+# Модели, доступные для выбора в CLI и вебе: id -> подпись для интерфейса.
+MODELS: dict[str, str] = {
+    "deepseek-v4-flash": "Flash — быстрая и дешёвая",
+    "deepseek-v4-pro": "Pro — медленнее, но качественнее",
+}
+
+# Модель по умолчанию: из .env (DEEPSEEK_MODEL), иначе первая из MODELS.
+DEFAULT_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
+MODEL = DEFAULT_MODEL  # сохранено для обратной совместимости
+
 BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com").rstrip("/")
 TIMEOUT = 60  # секунд, чтобы запрос не висел вечно
 
@@ -146,6 +156,7 @@ class LLMResult:
     """Результат запроса с метаданными для сравнения профилей."""
 
     text: str
+    model: str = ""                    # модель, ответившая на запрос
     finish_reason: str = ""            # "stop", "length", ...
     prompt_tokens: int = 0
     completion_tokens: int = 0         # включает reasoning_tokens
@@ -171,23 +182,26 @@ def ask_full(
     prompt: str,
     system: str = BASE_SYSTEM,
     *,
+    model: str = "",
     format_instruction: str = "",
     max_tokens: int | None = None,
     stop: list[str] | None = None,
 ) -> LLMResult:
     """Отправляет prompt в LLM с заданным уровнем контроля и возвращает LLMResult.
 
+    model — id модели (см. MODELS); пусто -> DEFAULT_MODEL.
     Бросает LLMError с человекочитаемым сообщением при любой проблеме.
     """
     if not prompt or not prompt.strip():
         raise LLMError("Пустой запрос.")
 
+    model = model or DEFAULT_MODEL
     system_content = system
     if format_instruction:
         system_content = f"{system}\n\n{format_instruction}"
 
     payload: dict = {
-        "model": MODEL,
+        "model": model,
         "messages": [
             {"role": "system", "content": system_content},
             {"role": "user", "content": prompt},
@@ -242,11 +256,13 @@ def ask_full(
 
     return LLMResult(
         text=text,
+        model=data.get("model", model),
         finish_reason=finish_reason,
         prompt_tokens=usage.get("prompt_tokens", 0),
         completion_tokens=usage.get("completion_tokens", 0),
         reasoning_tokens=reasoning_tokens,
         request_params={
+            "model": model,
             "max_tokens": max_tokens,
             "stop": stop,
             "format_instruction": bool(format_instruction),
@@ -273,9 +289,10 @@ def ask(
     prompt: str,
     system: str = BASE_SYSTEM,
     *,
+    model: str = "",
     profile: str = DEFAULT_PROFILE,
     fmt: str = DEFAULT_FORMAT,
     words: int = DEFAULT_WORDS,
 ) -> str:
     """Упрощённая обёртка: возвращает только текст ответа."""
-    return ask_full(prompt, system, **resolve_profile(profile, fmt, words)).text
+    return ask_full(prompt, system, model=model, **resolve_profile(profile, fmt, words)).text

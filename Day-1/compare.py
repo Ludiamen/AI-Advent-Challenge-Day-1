@@ -9,7 +9,7 @@
 Использование:
     python compare.py                                    # демо-запрос, строгий = список-3 / 50 слов
     python compare.py "Свой вопрос"
-    python compare.py --format шаги --words 200 "Вопрос"
+    python compare.py --model deepseek-v4-pro --format шаги --words 200 "Вопрос"
 """
 
 import argparse
@@ -17,8 +17,10 @@ import argparse
 from llm_client import (
     BASE_SYSTEM,
     DEFAULT_FORMAT,
+    DEFAULT_MODEL,
     DEFAULT_WORDS,
     FORMATS,
+    MODELS,
     PROFILE_FREE,
     PROFILE_STRICT,
     LLMError,
@@ -29,8 +31,8 @@ from llm_client import (
 DEMO_PROMPT = "Расскажи о пользе утренней зарядки."
 
 
-def run(title: str, prompt: str, params: dict) -> None:
-    result = ask_full(prompt, BASE_SYSTEM, **params)
+def run(title: str, prompt: str, model: str, params: dict) -> None:
+    result = ask_full(prompt, BASE_SYSTEM, model=model, **params)
 
     print("=" * 70)
     print(title)
@@ -43,6 +45,7 @@ def run(title: str, prompt: str, params: dict) -> None:
     print(result.text)
     print("-" * 70)
     print(
+        f"модель={result.model}  "
         f"finish_reason={result.finish_reason!r}  "
         f"слов={result.word_count}  "
         f"символов={len(result.text)}  "
@@ -58,6 +61,10 @@ def main() -> int:
     )
     parser.add_argument("prompt", nargs="*", help="запрос (по умолчанию — демо про утреннюю зарядку)")
     parser.add_argument(
+        "--model", choices=list(MODELS), default=DEFAULT_MODEL, metavar="МОДЕЛЬ",
+        help=f"модель DeepSeek для обоих запросов (по умолчанию {DEFAULT_MODEL})",
+    )
+    parser.add_argument(
         "--format", dest="fmt", choices=list(FORMATS), default=DEFAULT_FORMAT, metavar="ФОРМАТ",
         help=f"формат ответа для профиля «{PROFILE_STRICT}» (по умолчанию {DEFAULT_FORMAT})",
     )
@@ -68,14 +75,16 @@ def main() -> int:
     args = parser.parse_args()
 
     prompt = " ".join(args.prompt).strip() or DEMO_PROMPT
-    print(f"Запрос: {prompt}\n")
+    print(f"Запрос: {prompt}\nМодель: {args.model}\n")
 
     try:
-        run(f"БЕЗ ОГРАНИЧЕНИЙ (профиль «{PROFILE_FREE}»)", prompt, resolve_profile(PROFILE_FREE))
+        run(
+            f"БЕЗ ОГРАНИЧЕНИЙ (профиль «{PROFILE_FREE}»)",
+            prompt, args.model, resolve_profile(PROFILE_FREE),
+        )
         run(
             f"С ОГРАНИЧЕНИЯМИ (профиль «{PROFILE_STRICT}», формат={args.fmt}, слов≤{args.words})",
-            prompt,
-            resolve_profile(PROFILE_STRICT, args.fmt, args.words),
+            prompt, args.model, resolve_profile(PROFILE_STRICT, args.fmt, args.words),
         )
     except LLMError as exc:
         print(f"Ошибка: {exc}")

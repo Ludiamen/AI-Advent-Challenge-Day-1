@@ -3,6 +3,7 @@
 
 Быстрый старт:
     python cli.py "Ваш вопрос"                       # свободный ответ
+    python cli.py --model deepseek-v4-pro "Вопрос"
     python cli.py --profile строгий --format список-5 --words 10 "Вопрос"
     python cli.py                                    # интерактивный режим
 
@@ -14,9 +15,11 @@ import sys
 
 from llm_client import (
     DEFAULT_FORMAT,
+    DEFAULT_MODEL,
     DEFAULT_WORDS,
     FORMATS,
     MAX_WORDS,
+    MODELS,
     PROFILE_FREE,
     PROFILE_STRICT,
     LLMError,
@@ -26,8 +29,12 @@ from llm_client import (
 # --- справка -----------------------------------------------------------------
 
 _FORMATS_HELP = "\n".join(f"  {key:<13} — {meta['label']}" for key, meta in FORMATS.items())
+_MODELS_HELP = "\n".join(f"  {mid:<20} — {label}" for mid, label in MODELS.items())
 
 EPILOG = f"""\
+модели (--model):
+{_MODELS_HELP}
+
 профили (--profile):
   {PROFILE_FREE:<13} — без ограничений, модель отвечает как хочет
   {PROFILE_STRICT:<13} — заданный формат (--format) + предел длины (--words)
@@ -41,6 +48,9 @@ EPILOG = f"""\
 примеры:
   # свободный ответ
   python cli.py "Расскажи о пользе утренней зарядки"
+
+  # выбор модели (по умолчанию {DEFAULT_MODEL})
+  python cli.py --model deepseek-v4-pro "Расскажи о пользе утренней зарядки"
 
   # строгий: 5 пунктов, максимум 10 слов
   python cli.py --profile {PROFILE_STRICT} --format список-5 --words 10 "Чем полезна ходьба?"
@@ -60,7 +70,7 @@ INTERACTIVE_HELP = f"""\
 Команды диалога:
   ?  /  справка   — показать эту памятку
   Ctrl+C          — выход
-Профиль и формат заданы при запуске флагами --profile / --format / --words.
+Модель, профиль и формат заданы при запуске флагами --model / --profile / --format / --words.
 """
 
 # --- логика ----------------------------------------------------------------
@@ -73,6 +83,13 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("prompt", nargs="*", help="текст запроса; без него — интерактивный режим")
+    parser.add_argument(
+        "--model",
+        choices=list(MODELS),
+        default=DEFAULT_MODEL,
+        metavar="МОДЕЛЬ",
+        help=f"модель DeepSeek (по умолчанию: {DEFAULT_MODEL})",
+    )
     parser.add_argument(
         "--profile",
         choices=(PROFILE_FREE, PROFILE_STRICT),
@@ -100,7 +117,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = build_parser().parse_args()
     prompt = " ".join(args.prompt).strip()
-    kw = {"profile": args.profile, "fmt": args.fmt, "words": args.words}
+    kw = {"model": args.model, "profile": args.profile, "fmt": args.fmt, "words": args.words}
 
     if prompt:  # разовый запрос
         try:
@@ -112,7 +129,7 @@ def main() -> int:
 
     # Интерактивный режим
     tail = "" if args.profile == PROFILE_FREE else f", формат: {args.fmt}, слов: ≤{args.words}"
-    print(f"LLM CLI (профиль: {args.profile}{tail}).")
+    print(f"LLM CLI (модель: {args.model}, профиль: {args.profile}{tail}).")
     print("Введите вопрос. «?» — справка, Ctrl+C — выход.\n")
     while True:
         try:

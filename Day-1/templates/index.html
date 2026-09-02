@@ -28,6 +28,14 @@
     <textarea name="prompt" rows="4" placeholder="Ваш вопрос..." autofocus>{{ form.prompt }}</textarea>
 
     <div class="row">
+      <label>Модель
+        <select name="model">
+          {% for mid, mlabel in models.items() %}
+            <option value="{{ mid }}" {{ 'selected' if mid == form.model }}>{{ mid }} — {{ mlabel }}</option>
+          {% endfor %}
+        </select>
+      </label>
+
       <label>Профиль
         <select name="profile">
           {% for p in profiles %}
@@ -66,14 +74,23 @@
   {% elif result is not none %}
     <div class="box">{{ result.text }}</div>
     <div class="meta">
-      finish_reason={{ result.finish_reason }} · слов={{ result.word_count }} ·
-      символов={{ result.text|length }} · completion_tokens={{ result.completion_tokens }}
-      (reasoning={{ result.reasoning_tokens }})
+      модель={{ result.model }} · finish_reason={{ result.finish_reason }} ·
+      слов={{ result.word_count }} · символов={{ result.text|length }} ·
+      completion_tokens={{ result.completion_tokens }} (reasoning={{ result.reasoning_tokens }})
     </div>
   {% endif %}
 
   <details>
     <summary>❓ Справка по форме</summary>
+
+    <p><b>Модель</b> — какой LLM отвечает на запрос:</p>
+    <table>
+      <tr><th>Значение</th><th>Когда выбирать</th></tr>
+      {% for mid, mlabel in models.items() %}
+        <tr><td><code>{{ mid }}</code></td><td>{{ mlabel }}</td></tr>
+      {% endfor %}
+    </table>
+    <p>Выбор модели не зависит от профиля и работает и со «{{ profiles[0] }}», и со «{{ strict_profile }}».</p>
 
     <p><b>Профиль</b> — насколько жёстко управляем ответом:</p>
     <table>
