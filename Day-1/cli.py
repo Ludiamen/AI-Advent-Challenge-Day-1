@@ -24,6 +24,7 @@ from llm_client import (
     PROFILE_STRICT,
     LLMError,
     ask,
+    resolve_profile,
 )
 
 # --- справка -----------------------------------------------------------------
@@ -117,6 +118,11 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = build_parser().parse_args()
     prompt = " ".join(args.prompt).strip()
+    try:  # проверяем профиль/формат/слова сразу, до запросов и интерактива
+        resolve_profile(args.profile, args.fmt, args.words)
+    except LLMError as exc:
+        print(f"Ошибка: {exc}", file=sys.stderr)
+        return 1
     kw = {"model": args.model, "profile": args.profile, "fmt": args.fmt, "words": args.words}
 
     if prompt:  # разовый запрос
