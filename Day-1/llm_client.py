@@ -1,8 +1,8 @@
 """Минимальный клиент к LLM DeepSeek (API совместим с OpenAI Chat Completions).
 
 Публичное API:
-  ask(prompt, ...)                    -> str        — только текст (используют cli.py, web.py)
-  ask_full(prompt, ...)              -> LLMResult   — текст + finish_reason + расход токенов
+  ask(prompt, ...)                    -> str        — только текст (использует cli.py)
+  ask_full(prompt, ...)              -> LLMResult   — текст + finish_reason + расход токенов (web.py, compare.py)
   MODELS                            -> dict        — модели на выбор (id -> подпись)
   PROFILES                          -> dict        — профиль «свободный» (без ограничений)
   FORMATS                           -> dict        — варианты формата для профиля «строгий»
@@ -36,8 +36,10 @@ MODELS: dict[str, str] = {
     "deepseek-v4-pro": "Pro — медленнее, но качественнее",
 }
 
-# Модель по умолчанию: из .env (DEEPSEEK_MODEL), иначе первая из MODELS.
-DEFAULT_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
+# Модель по умолчанию: из .env (DEEPSEEK_MODEL), если она есть в MODELS,
+# иначе первая из MODELS.
+_env_model = os.getenv("DEEPSEEK_MODEL", "")
+DEFAULT_MODEL = _env_model if _env_model in MODELS else next(iter(MODELS))
 MODEL = DEFAULT_MODEL  # сохранено для обратной совместимости
 
 BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com").rstrip("/")
